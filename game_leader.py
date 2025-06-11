@@ -28,6 +28,8 @@ logger.addHandler(rotating_handler)
 # Console handler
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
+
+
 logger.addHandler(console_handler)
 # Suppress unnecessary logs from other libs
 for lib in ['tornado', 'asyncio', 'httpx', 'httpcore', 'openai', 'urllib3', 'requests']:
@@ -44,7 +46,7 @@ VILLAGER: str = "villageois"
 # hard limits
 MAX_INTERRUPTIONS: int = 2
 MAX_ROUNDS: int = 20
-API_TIMEOUT: int = 4 # seconds
+API_TIMEOUT: int = 10 # seconds
 
 
 
