@@ -45,7 +45,7 @@ class WerewolfPlayer(WerewolfPlayerInterface):
         """
         self.name = name
         print(f"WerewolfPlayer {self.name} created")        
-        # TODO implement me
+        # TODO add your code here, if necessary
 
 
     def speak(self) -> str:
@@ -63,7 +63,7 @@ class WerewolfPlayer(WerewolfPlayerInterface):
         """
         print(f"{self.name} is given the floor")
         # TODO implement me
-        return ""
+        return "C'est même pas vrai!"
     
 
     def notify(self, message: str) -> Intent:

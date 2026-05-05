@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import math
 import json
 
-from app import Logger, WebLogger, GameLogEntry
+from game_webapp import Logger, WebLogger, GameLogEntry
 
 
 
@@ -52,7 +52,6 @@ API_TIMEOUT: int = 4 # seconds
 
 class Player(BaseModel):
     name: str
-    is_female: bool
     role: str = "unassigned"
     api_base_url: str
     api_endpoint: str = None
@@ -751,7 +750,7 @@ if __name__ == "__main__":
     with open("players_config.json", "r", encoding="utf-8") as f:
         config = json.load(f)
     players = [
-        Player(name=p["name"], is_female=p["is_female"], api_base_url=p["api_base_url"]) for p in config["players"]
+        Player(name=p["name"], api_base_url=p["api_base_url"]) for p in config["players"]
     ]
     
     # weblogger if w flag

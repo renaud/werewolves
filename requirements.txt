@@ -4,3 +4,4 @@ flask_socketio
 requests
 openai
 python-dotenv
+gunicorn

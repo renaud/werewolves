@@ -1,102 +1,141 @@
-# 
-# Webapp to display game logs. 
-# You DON'T NEED to run this, it will be automatically started by game_leader.py
-#
-from abc import ABC, abstractmethod
-from datetime import datetime, timezone
-import json
-import logging
-import threading
-import time
-import webbrowser
-from typing import Any, Dict, List, Optional, Tuple
+from flask import Flask, request, jsonify
+from werewolf import WerewolfPlayer
+from datetime import datetime
 
-from flask import Flask, request, jsonify, render_template, send_from_directory, Response
-from flask_socketio import SocketIO
-from pydantic import BaseModel
+def create_app():
+    app = Flask(__name__)
+    
+    # where players are stored. TODO check that not too many players are created; remove "old" players
+    app.config['WerewolfPlayers'] = {}
+    
+    @app.route('/new_game', methods=['POST'])
+    def new_game():
+        """
+        Endpoint appelé par le meneur pour créer une nouvelle partie. 
+            
+        Args:
+            ```json
+            {
+                "role": "villageois",
+                "player_name": "Aline",
+                "players_names": ["Aline", "Benjamin", "Chloe", ...],
+                "werewolves_count": 2 (the total # of werewolves)
+                "werewolves": ["Benjamin", "Chloe"]  # vide si le joueur est un villageois
+            }
+            ```
+    
+        Returns: un JSON avec {"ack": True} pour checker que le joueur est bien connecté et un identifiant unique pour le joueur.
+        """
 
-# mute Flask and Werkzeug logs
-logging.getLogger('werkzeug').setLevel(logging.ERROR)
-logging.getLogger('flask.app').setLevel(logging.ERROR)
-
-class GameLogEntry(BaseModel):
-    timestamp: datetime = datetime.now(timezone.utc)
-    type: str
-    actor_name: Optional[str] = "GameLeader"
-    target_name: Optional[str] = None
-    content: str
-    public: bool = True
-    context_data: Optional[Dict[str, Any]] = None
-
-    def to_string(self, sequence_number: int = 0) -> str:
-        parts = [f"[{sequence_number}] Event: {self.type}"]
-        if self.actor_name:
-            parts.append(f"Actor: {self.actor_name}")
-        if self.target_name:
-            parts.append(f"Target: {self.target_name}")
-        parts.append(f"Content: {self.content}")
-        if self.context_data:
-            context_str = ", ".join([f"{k}: {v}" for k, v in self.context_data.items()])
-            parts.append(f"Context: ({context_str})")
-        return "\n".join(parts)
-
-
-class Logger(ABC):
-    @abstractmethod
-    def log(self, entry: GameLogEntry) -> None:
-        pass
-
-
-class WebLogger(Logger):
-
-    def __init__(self, port=4999):
-        self.entries = []
-        self.port = port
-        self.app = Flask(__name__, static_folder='public', static_url_path='/static')
-        self.socketio = SocketIO(self.app, cors_allowed_origins="*")
+        role = request.json.get("role")
+        player_name = request.json.get("player_name")
+        players_names = request.json.get("players_names")
+        werewolves_count = request.json.get("werewolves_count")
+        werewolves = request.json.get("werewolves")
+        assert role in ["villageois", "voyante", "loup-garou"], "Role invalide"
+        assert player_name is not None, f"Nom de joueur manquant, player_name: {player_name}"
+        assert players_names is not None, f"Liste de joueurs manquante, players_names: {players_names}"
+        assert isinstance(players_names, list), f"Liste de joueurs invalide, players_names: {players_names}"
+        assert len(players_names) > 0, f"Liste de joueurs vide, players_names: {players_names}"
         
-        @self.app.route('/')
-        def index():
-            return send_from_directory('public', 'index.html')
+        player = WerewolfPlayer.create(player_name, role, players_names.copy(), werewolves_count, werewolves.copy())
+        if player:
+            # add the player to the list of players
+            players = app.config['WerewolfPlayers']
+            player_id = len(players)
+            app.config['WerewolfPlayers'][player_id] = player
+
+            return jsonify({"ack": True, "player_id": player_id})
+        else:
+            return jsonify({"ack": False})
+
+    
+    @app.route('/<int:player_id>/speak', methods=['POST'])
+    def speak(player_id):
+        """
+        Endpoint appelé par le meneur pour donner la parole à un joueur.
+        Le joueur doit alors prendre la parole dans le jeu. 
+    
+        Args:
+            player_id: L'identifiant du joueur qui doit parler
         
-        @self.app.route('/api/logs')
-        def get_logs():
-            # Convert all entries to dict and ensure timestamp is a string
-            return jsonify([
-                {
-                    **entry.dict(),
-                    "timestamp": entry.timestamp.isoformat() if isinstance(entry.timestamp, datetime) else entry.timestamp
-                }
-                for entry in self.entries
-            ])
+        Returns:
+            Un message contenant le texte que le joueur dit. 
+            Un joueur peut décider de ne pas parler (retourner un `speech` vide). Exemple:
+            ```json
+            {
+                "speech": "Je crois que Aline ment car ..."
+            }
+            ```
+        """
+        players = app.config['WerewolfPlayers']
+        if player_id not in players:
+            return jsonify({"error": f"Player {player_id} not found"}), 404
         
-        # Start the server in a background thread
-        self._server_thread = threading.Thread(target=self._run_server, daemon=True)
-        self._server_thread.start()
-        # open browser after a short delay
-        threading.Timer(0.5, lambda: webbrowser.open_new(f'http://localhost:{self.port}/')).start()
+        player = players[player_id]
+        speech = player.speak()
+        return jsonify({"speech": speech})
 
-    def _run_server(self):
-        # debug=False, use_reloader=False to avoid thread issue
-        self.socketio.run(self.app, port=self.port, debug=False, use_reloader=False)
 
-    def log(self, entry: GameLogEntry) -> None:
-        self.entries.append(entry)
-        entry_dict = entry.dict()  # fails with model_dump_json() because of datetime
-        entry_dict['timestamp'] = entry.timestamp.isoformat()
-        self.socketio.emit('new_log_entry', entry_dict)
+    @app.route('/<int:player_id>/notify', methods=['POST'])
+    def notify(player_id):
+        """
+        Endpoint appelé par le meneur pour deux objectifs principaux:
+    
+        1. Informer le joueur sur l'état du jeu:
+           - Qui a parlé et ce qui a été dit
+           - Si c'est la nuit
+           - Les rumeurs
+           - Si c'est le moment de voter
+           - Le résultat du vote (qui a été éliminé et son rôle)
+           - Autres informations pertinentes sur l'état du jeu
+    
+        Le message est **sous forme de texte uniquement** et c'est au joueur de l'interpréter en fonction du contexte.
+        Le message contient uniquement le dernier (nouveau) message du meneur, c'est au joueur de mémoriser les informations des messages précédents.
+        
+        2. Recevoir les actions du joueur:
+           - Demande de prise de parole
+           - Demande d'interruption
+           - Vote
+    
+        La réponse suivra **strictement le schéma** ci-dessous, sans quoi elle sera ignorée par le meneur.
+        
+        Args:
+            player_id: L'identifiant du joueur
+            message: Un message du meneur. Exemple:
+            ```json
+            {
+                "message": "C'est le matin, le village se réveille. Aline a été tuée cette nuit. Aline était une villageoise."
+            }
+            ```
+        Returns:
+            Un message contenant les actions du joueur. Schéma:
+            ```json
+            {
+                "want_to_speak": True | False,
+                "want_to_interrupt": True | False,
+                "vote_for": "Aline" | "Benjamin" | ... | None
+            }
+            ```
+        """
+        players = app.config['WerewolfPlayers']
+        if player_id not in players:
+            return jsonify({"error": f"Player {player_id} not found"}), 404
+        
+        player = players[player_id]
+        message = request.json.get('message')
+        intent = player.notify(message)
+        return jsonify(intent.model_dump(mode="json"))
+    
+    @app.route('/', methods=['GET', 'POST'])
+    def ping():
+        # prints the current time as a html page
+        return f"<html><body><h1>Werewolf server is running, {datetime.now()}</h1></body></html>"
 
-if __name__ == "__main__":
-    #########################################################
-    # NOT MEANT TO BE RUN, ONLY FOR TESTING
-    #########################################################
-    logger = WebLogger()
-    # load the game logs from the file
-    with open("game_logs3.json", "r", encoding="utf-8") as f:
-        game_logs = json.load(f)
 
-    for log in game_logs:
-        time.sleep(0.2)
-        print("Logging entry:", log)
-        logger.log(GameLogEntry(**json.loads(log)))
-    time.sleep(10)
+    return app
+
+
+# Module-level Flask app for Vercel auto-detection.
+# To launch local players, use `python local_players.py` instead.
+app = create_app()
