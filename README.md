@@ -4,6 +4,21 @@
 
 Codebase for our project at [ISC](https://isc.hevs.ch/) to play a game of "Loups-Garous" with LLMs.
 
+## How to clone
+
+```bash
+git clone https://github.com/renaud/werewolves.git werewolves
+cd werewolves
+```
+
+Then create an empty private repository on GitHub called `werewolves` and push your clone to it:
+
+```bash
+git remote set-url origin https://github.com/YOUR_USERNAME/werewolves.git
+git push -u origin main
+```
+
+
 ## Instructions
 
 [projet_loups_garous.pdf](projet_loups_garous.pdf)

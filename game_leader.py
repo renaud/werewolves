@@ -19,7 +19,7 @@ from logging.handlers import RotatingFileHandler
 LOG = logging.getLogger(__name__)
 
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 # Rotating file handler
 rotating_handler = RotatingFileHandler('game_leader.log', maxBytes=5*1024*1024, backupCount=50)
 #formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -45,7 +45,7 @@ VILLAGER: str = "villageois"
 # hard limits
 MAX_INTERRUPTIONS: int = 2
 MAX_ROUNDS: int = 20
-API_TIMEOUT: int = 4 # seconds
+API_TIMEOUT: int = 15 # seconds
 
 
 
@@ -98,7 +98,7 @@ class ApiCalls:
     """Handles all API communications with players."""
     
     @staticmethod
-    def post_new_game(player: Player, players_names: List[str], werewolves_cnt:int, werewolves: List[Optional[str]]) -> int:
+    def post_new_game(player: Player, players_names: List[str], werewolves_cnt:int, werewolves: List[Optional[str]]) -> Optional[str]:
         """
         Send a POST request to /new_game endpoint.
         
@@ -106,7 +106,7 @@ class ApiCalls:
             player: The player
             
         Returns:
-            bool: True if the player is connected, False otherwise
+            Optional[str]: The player_id if the player is connected, None otherwise
         """
         try:
             LOG.debug(f"--> new_game for {player.name} ({player.role})")
@@ -125,10 +125,10 @@ class ApiCalls:
             response.raise_for_status()
             # get the player_id
             player_id = response.json()["player_id"]
-            return player_id
+            return str(player_id)
         except Exception as e:
             LOG.warning(f"Error in post_new_game for {player.name}: {str(e)}")
-            return -1
+            return None
     
     @staticmethod
     def post_speech(player: Player) -> Optional[str]:
@@ -247,7 +247,7 @@ class GameLeader:
                 player_id = self.api.post_new_game(player, players_names, len(werewolves), werewolves)
             else:
                 player_id = self.api.post_new_game(player, players_names, len(werewolves), [])
-            if player_id < 0:
+            if player_id is None:
                 success = False
                 self.log(GameLogEntry(
                     type="ERROR",
@@ -257,7 +257,7 @@ class GameLeader:
                 break
             else:
                 # update player's api
-                player.api_endpoint = f"{player.api_base_url}{player_id}/"
+                player.api_endpoint = f"{player.api_base_url.rstrip('/')}/{player_id}"
         
         return success
 
@@ -690,9 +690,13 @@ class GameLeader:
                 content=announcement
             ))
             intents = self.announce_to_all(announcement)
-            player_to_check:str = [intent.vote_for for intent in intents if intent.player_name == seer.name][0]
+            
+            # Find the Seer's intent in the responses
+            seer_intent = next((i for i in intents if i.player_name == seer.name), None)
+            player_to_check = seer_intent.vote_for if seer_intent else None
+
             LOG.debug(f"Seer asked to check player: {player_to_check}")
-            if player_to_check in [p.name for p in self.players_actives()]:
+            if player_to_check and player_to_check in [p.name for p in self.players_actives()]:
                 player_to_check_role = self.get_player_by_name(player_to_check).role
                 announcement_to_voyante = f"Le rôle de {player_to_check} est {player_to_check_role}"
                 # special case where we just notify a single player
@@ -704,8 +708,12 @@ class GameLeader:
                     public=False,
                     context_data={"player_to_check": player_to_check, "player_to_check_role": player_to_check_role}
                 ))
-            else:
+            elif player_to_check:
                 LOG.info(f"Le joueur {player_to_check} n'est pas dans la partie. La Voyante ne peut pas sonder.")
+            elif seer_intent is None:
+                LOG.warning(f"La Voyante ({seer.name}) n'a pas répondu à temps.")
+            else:
+                LOG.info(f"La Voyante ({seer.name}) n'a choisi personne à sonder.")
 
         # loup garous votent
         loup_garous = [player for player in self.players_actives() if player.role == WEREWOLF]
@@ -716,6 +724,7 @@ class GameLeader:
             content=msg,
             context_data={"loup_garous": [name(loupgarou) for loupgarou in loup_garous]}
         ))
+        self.announce_to_all(msg)
         last_vote = ""
         victim = None
         rounds = 0
@@ -780,10 +789,20 @@ if __name__ == "__main__":
             if game.check_if_game_is_over() is not None:
                 break
         game.print_game_summary(verbose=True)
+        winner = game.check_if_game_is_over()
+        if winner == VILLAGER:
+            announcement = "La partie est terminée ! Les villageois ont gagné !"
+        elif winner == WEREWOLF:
+            announcement = "La partie est terminée ! Les loups-garous ont gagné !"
+        else:
+            announcement = f"La partie est terminée ! {winner} a gagné !"
+
         game.log(GameLogEntry(
             type="GAME_OVER",
-            content=f"Game over! {game.check_if_game_is_over()} win!"
+            content=announcement,
+            context_data={"winner": winner}
         ))
+        game.announce_to_all(announcement)
 
         # save the game logs to a file
         #with open("game_logs2.json", "w", encoding="utf-8") as f:
