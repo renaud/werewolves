@@ -531,7 +531,7 @@ class GameLeader:
 
     def day_time(self, victim: Optional[Player]) -> None:
     
-        rumors = self.generate_rumors()
+        rumors = self.generate_rumors(victim)
         
         # annonce de la victime de la nuit passée
         if victim is None:
@@ -667,12 +667,78 @@ class GameLeader:
             return self.get_player_by_name(top_voted[0])
 
 
-    def generate_rumors(self) -> str:
+    def generate_rumors(self, victim: Optional[Player]) -> str:
         """
-        Generate rumors about the night.
-        """
-        return "" # LATER generate rumors
+        Morning rumor (embedded in the announcement). Philosophy: the rumor
+        mainly serves to COORDINATE the village's attention (break the scattered
+        early voting), not necessarily to tell the truth.
 
+        Two dials, function of the number of alive players `n` (game starts at ~12):
+        - rumor_chance (frequency): high at the start (need a focal point),
+          decreasing afterwards (the game then produces its own information).
+        - p_signal (prob the named group holds a real WW): LOW at the extremes
+          -- start (disinfo, don't burn the wolves) and endgame (an accusation
+          there is near-lethal) -- HIGHER mid-game where a hint isn't decisive.
+        """
+        actives = self.players_actives()
+        n = len(actives)
+        if n < 4:
+            return ""  # too few people, no rumor
+
+        # frequency: ~0.9 at 12 alive, decreasing towards ~0.5 in the endgame
+        rumor_chance = 0.4 + 0.5 * (n / len(self.players))
+        if random.random() > rumor_chance:
+            return ""  # no rumor this morning
+
+        # p_signal: low at the extremes, higher in the middle
+        if n >= 10:     # early game
+            p_signal = 0.20
+        elif n >= 6:    # mid game
+            p_signal = 0.45
+        else:           # endgame (4-5 alive)
+            p_signal = 0.20
+
+        werewolves = [p for p in actives if p.role == WEREWOLF]
+        villagers = [p for p in actives if p.role != WEREWOLF]
+
+        # the rumor "carries real signal" if its group contains a wolf
+        has_signal = bool(werewolves) and random.random() < p_signal
+
+        # number of named players: 1 to 3 (biased towards 1-2), capped by alive count
+        nr_names = min(random.choice([1, 1, 2, 2, 3]), n)
+
+        # build the named group
+        if has_signal:
+            named = [random.choice(werewolves)]
+            others = [p for p in actives if p is not named[0]]
+        else:
+            named = []
+            others = villagers or actives  # red herring: villagers only if possible
+        random.shuffle(others)
+        named += others[: nr_names - len(named)]
+        random.shuffle(named)
+
+        # templates: clauses that follow "On raconte que ..."
+        def join(players):
+            ns = [p.name for p in players]
+            return ns[0] if len(ns) == 1 else ", ".join(ns[:-1]) + " et " + ns[-1]
+
+        who = join(named)
+        a_ont = "ont" if len(named) > 1 else "a"
+        templates = [
+            f"du bruit venait du côté de {who} cette nuit",
+            f"{who} {a_ont} été aperçu.e.s rôdant dans le village après le coucher du soleil",
+            f"la nuit a été étrangement calme du côté de {who}",
+            f"une ombre a été vue près de chez {who}",
+        ]
+        if victim is not None:
+            templates.append(f"{victim.name} aurait croisé {who} juste avant de disparaître")
+
+        rumor = random.choice(templates)
+        LOG.debug(f"rumor: named={name(named)} has_signal={has_signal} "
+                  f"(n={n}, p_signal={p_signal}, nr_names={nr_names})")
+        return "On raconte que " + rumor
+    
 
     def night_time(self) -> Optional[Player]:
 
@@ -741,6 +807,8 @@ class GameLeader:
                 if intents is not None:  # don't consider invalid responses
                     votes.append(intents)
             # validate_votes returns a list of tuples (player_name, vote_for). we only care for the vote_for
+            # BY DESIGN: validate_votes only checks the target exists and is alive, NOT its role. Werewolves
+            # are therefore free to agree on (and eat) a fellow werewolf. We don't forbid it on purpose.
             valid_votes = [vote[1] for vote in self.validate_votes(votes)]
             LOG.debug(f"valid_votes: {valid_votes}, rounds: {rounds}")
             # if all votes validated and all loup garous voted for the same player, we have a victim
