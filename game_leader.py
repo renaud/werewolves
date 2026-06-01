@@ -877,13 +877,20 @@ class GameLeader:
         self.announce_to_all(msg)
         last_vote = ""
         victim = None
-        rounds = 0
-        # WW must ALL respond, target VALID players and agree agree on the EXACT SAME victim 
-        max_rounds = 2 * len(loup_garous) # nr. of negotiation rounds depens on WW count: 2 wolves -> 4 rounds, 3 -> 6, etc.
-        while victim is None and rounds < max_rounds:
+        # VOTING RULE:
+        # - A single werewolf settles it in 1 round (their valid target dies directly).
+        # - Several werewolves always vote over exactly 3 rounds. Rounds 1 & 2 are
+        #   indicative only (nobody dies), they let the wolves see each other's votes
+        #   and converge. Round 3 is the binding round, decided by relative majority
+        #   (plurality): the most-voted name wins, ties broken at random.
+        # - At the 3rd round (binding round), if any werewolf casts an invalid vote (dead/unknown
+        #   target) or fails to respond (null), nobody dies that night!
+        max_rounds = 1 if len(loup_garous) == 1 else 3
+        for rounds in range(max_rounds):
+            is_final = rounds == max_rounds - 1
             msg = f"Les Loups-Garous votent pour une nouvelle victime !!! {last_vote}"
             votes = []
-            for loupgaroup in loup_garous: 
+            for loupgaroup in loup_garous:
                 intents = self.announce_to_one(loupgaroup, msg)
                 if intents is not None:  # don't consider invalid responses
                     votes.append(intents)
@@ -891,20 +898,29 @@ class GameLeader:
             # BY DESIGN: validate_votes only checks the target exists and is alive, NOT its role. Werewolves
             # are therefore free to agree on (and eat) a fellow werewolf. We don't forbid it on purpose.
             valid_votes = [vote[1] for vote in self.validate_votes(votes)]
-            LOG.debug(f"valid_votes: {valid_votes}, rounds: {rounds}")
-            # if all votes validated and all loup garous voted for the same player, we have a victim
-            LOG.debug(f"valid_votes from loup garous: {valid_votes}")
-            if len(valid_votes) == len(loup_garous) and len(set(valid_votes)) == 1:
-                victim = self.get_player_by_name(valid_votes[0])
-                LOG.debug(f"victim: {name(victim)}")
-                # LATER: should we log the vote? i think it's logged when village awakes...
-                self.eliminate_player(victim, "night")
-                LOG.debug(f"victim eliminated: {name(victim)}")
-            else:
+            LOG.debug(f"valid_votes: {valid_votes}, rounds: {rounds}, is_final: {is_final}")
+
+            if not is_final:
+                # Indicative round: nobody dies, just feed the votes back to the wolves.
                 last_vote = f"Dernier vote: " + ", ".join([f"{i.player_name} a voté pour {i.vote_for}" for i in votes])
-                LOG.debug(f"no consensus found, rounds: {rounds}")
-            rounds += 1
-                
+                LOG.debug(f"indicative round {rounds}, no elimination")
+                continue
+
+            # Binding round. If any werewolf vote is invalid/missing, nobody dies tonight.
+            if len(valid_votes) != len(loup_garous):
+                LOG.debug(f"binding round: {len(valid_votes)}/{len(loup_garous)} valid votes -> nobody dies tonight")
+                break
+
+            # Relative majority (plurality), random tie-break among the most-voted names.
+            counts = Counter(valid_votes)
+            top_count = max(counts.values())
+            top_names = [vote_for for vote_for, count in counts.items() if count == top_count]
+            chosen = random.choice(top_names)
+            LOG.debug(f"binding round: counts={dict(counts)}, top_names={top_names}, chosen={chosen}")
+            victim = self.get_player_by_name(chosen)
+            self.eliminate_player(victim, "night")
+            LOG.debug(f"victim eliminated: {name(victim)}")
+
         return victim
     
 
