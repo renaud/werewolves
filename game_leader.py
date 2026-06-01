@@ -46,6 +46,30 @@ VILLAGER: str = "villageois"
 MAX_INTERRUPTIONS: int = 2
 MAX_ROUNDS: int = 20
 API_TIMEOUT: int = 15 # seconds
+MAX_SENTENCES: int = 4    # speeches are trimmed to this many sentences
+MAX_SPEECH_CHARS: int = 500  # ... and then to this many characters (safety net)
+
+
+def truncate_speech(speech: str, max_sentences: int = MAX_SENTENCES, max_chars: int = MAX_SPEECH_CHARS) -> str:
+    """
+    Trim a player's speech to at most `max_sentences` sentences and `max_chars`
+    characters. Sentence-splitting keeps the trailing punctuation (. ! ? …).
+    The char cap is a safety net for run-on speeches with little punctuation;
+    it cuts at the last word boundary that fits.
+    """
+    import re
+    text = speech.strip()
+    # keep the first `max_sentences` chunks ending in . ! ? … (or end of string)
+    sentences = re.findall(r'.+?(?:[.!?…]+|$)', text, flags=re.DOTALL)
+    sentences = [s for s in sentences if s.strip()]
+    text = "".join(sentences[:max_sentences]).strip()
+    # char cap: cut at the last whitespace that fits, fall back to a hard cut
+    if len(text) > max_chars:
+        cut = text[:max_chars]
+        if " " in cut:
+            cut = cut[:cut.rfind(" ")]
+        text = cut.rstrip() + "…"
+    return text
 
 
 
@@ -151,7 +175,10 @@ class ApiCalls:
             assert type(speech) == str, f"Speech is not a string: {speech}"
             if len(speech) == 0:
                 LOG.warning(f"Speech is empty for {player.name}")
-            return speech
+            trimmed = truncate_speech(speech)
+            if trimmed != speech.strip():
+                LOG.debug(f"Trimmed speech for {player.name}: {len(speech)} -> {len(trimmed)} chars")
+            return trimmed
         except Exception as e:
             LOG.warning(f"Error in post_speech for {player.name}: {str(e)}")
             return None
