@@ -731,7 +731,9 @@ class GameLeader:
         last_vote = ""
         victim = None
         rounds = 0
-        while victim is None and rounds < 4:  # LATER always use 4?
+        # WW must ALL respond, target VALID players and agree agree on the EXACT SAME victim 
+        max_rounds = 2 * len(loup_garous) # nr. of negotiation rounds depens on WW count: 2 wolves -> 4 rounds, 3 -> 6, etc.
+        while victim is None and rounds < max_rounds:
             msg = f"Les Loups-Garous votent pour une nouvelle victime !!! {last_vote}"
             votes = []
             for loupgaroup in loup_garous: 
