@@ -322,7 +322,9 @@ class GameLeader:
         # check win conditions
         if alive_werewolves == 0:
             return VILLAGER
-        elif alive_villagers == 0:
+        elif alive_werewolves >= alive_villagers:
+            # werewolves win as soon as they equal or outnumber the villagers:
+            # they can no longer be voted out
             return WEREWOLF
         else:  # game continues
             return None
@@ -441,6 +443,7 @@ class GameLeader:
                 content=msg,
                 context_data={"reason": "no_speech_response"}
             ))
+            self.eliminate_player(speaker, "day")
             return self.announce_to_all(msg, exclude_player=speaker.name)
         else:
             # log the speech
