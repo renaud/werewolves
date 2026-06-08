@@ -491,7 +491,14 @@ class GameLeader:
         # tell the survivors who dropped out (skip when called recursively, so a
         # failure during this very announcement doesn't trigger another one)
         if eliminated and announce_disconnections:
-            self.announce_to_all(self._disconnection_message(eliminated),
+            disconnection_msg = self._disconnection_message(eliminated)
+            self.log(GameLogEntry(
+                type="DISCONNECTION",
+                content=disconnection_msg,
+                context_data={"reason": "no_notify_response",
+                              "disconnected": [p.name for p in eliminated]}
+            ))
+            self.announce_to_all(disconnection_msg,
                                  exclude_player=exclude_player,
                                  announce_disconnections=False)
 

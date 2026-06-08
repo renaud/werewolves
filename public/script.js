@@ -71,9 +71,13 @@ new Vue({
                     });
                 } else {
                     // Check for elimination events
-                    if ((message.type === 'VOTE_RESULT' || message.type === 'MORNING_VICTIM') && 
+                    if ((message.type === 'VOTE_RESULT' || message.type === 'MORNING_VICTIM') &&
                         message.context_data && message.context_data.victim) {
                         this.markPlayerAsEliminated(message.context_data.victim);
+                    }
+                    // Player eliminated for not responding (/notify or /speak); name is in actor_name
+                    if (message.type === 'ELIMINATE_PLAYER' && message.actor_name) {
+                        this.markPlayerAsEliminated(message.actor_name);
                     }
                     this.addMessage(message);
                 }
@@ -185,9 +189,13 @@ new Vue({
                         });
                     } else {
                         // Check for elimination events in historical data
-                        if ((message.type === 'VOTE_RESULT' || message.type === 'MORNING_VICTIM') && 
+                        if ((message.type === 'VOTE_RESULT' || message.type === 'MORNING_VICTIM') &&
                             message.context_data && message.context_data.victim) {
                             this.markPlayerAsEliminated(message.context_data.victim);
+                        }
+                        // Player eliminated for not responding (/notify or /speak); name is in actor_name
+                        if (message.type === 'ELIMINATE_PLAYER' && message.actor_name) {
+                            this.markPlayerAsEliminated(message.actor_name);
                         }
                         this.addMessage(message);
                     }
